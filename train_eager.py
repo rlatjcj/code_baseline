@@ -53,60 +53,42 @@ def main():
     ##########################
     # Generator
     ##########################
-    trainset, valset, unlabset = set_dataset(args, logger)
+    trainset, valset, testset = set_dataset(args, logger)
+    train_generator = dataloader(args, trainset, 'train')
+    val_generator = dataloader(args, valset, 'val', False)
 
-    train_generator = create_generator(args, trainset, "train", args.batch_size)
-    val_generator = create_generator(args, valset, "val", args.batch_size)
-    unlabel_generator = dataloader(args, unlabset)
+    # for t in train_generator:
+    #     print(t[0]['main_input'].shape, t[0]['main_input'].numpy().min(), t[0]['main_input'].numpy().max(), 
+    #           t[1]['main_output'].shape, t[1]['main_output'].numpy().min(), t[1]['main_output'].numpy().max(), 
+    #           t[1]['main_output'].numpy().argmax())
+    #     print()
 
     logger.info("TOTAL STEPS OF DATASET FOR TRAINING")
     logger.info("========== trainset ==========")
+    logger.info("    --> {}".format(len(trainset)))
     steps_per_epoch = args.steps or len(trainset) // args.batch_size
     logger.info("    --> {}".format(steps_per_epoch))
-    # logger.info("    --> {}".format(trainset[:, 2:].sum(axis=0)))
-    # logger.info("    --> {}".format(class_weight))
 
     logger.info("=========== valset ===========")
     validation_steps = len(valset) // args.batch_size
+    logger.info("    --> {}".format(len(valset)))
     logger.info("    --> {}".format(validation_steps))
-    # logger.info("    --> {}".format(valset[:, 2:].sum(axis=0)))
-
-    ##########################
-    # Model
-    ##########################
-    if args.multi_gpu:
-        raise ValueError()
-        # assert float(tf.__version__[:3]) == 2.2
-        
-        # strategy = tf.distribute.MirroredStrategy()
-        # # strategy = tf.distribute.experimental.CentralStorageStrategy() # over 2.1
-        # with strategy.scope():
-        #     model = set_model.Backbone(args, logger)
-    else:
-        model = set_model.Backbone(args, logger)
-
-    if args.summary:
-        model.summary()
-        print(model.inputs[0])
-        print(model.get_layer(name="fc2"))
-        return
-
-    logger.info("Build model!")
 
     ##########################
     # Metric
     ##########################
     metrics = {
         'loss'    :   tf.keras.metrics.Mean('loss', dtype=tf.float32),
-        'loss_xe' :   tf.keras.metrics.Mean('loss_xe', dtype=tf.float32),
-        'loss_kl' :   tf.keras.metrics.Mean('loss_kl', dtype=tf.float32),
         'acc'     :   tf.keras.metrics.CategoricalAccuracy('acc', dtype=tf.float32),
         'val_loss':   tf.keras.metrics.Mean('val_loss', dtype=tf.float32),
         'val_acc' :   tf.keras.metrics.CategoricalAccuracy('val_acc', dtype=tf.float32),
     }
 
-    lr_scheduler = create_callbacks(args, steps_per_epoch, metrics)
-    optimizer = tf.keras.optimizers.Adam(lr_scheduler)
+    csvlogger, lr_scheduler = create_callbacks(args, steps_per_epoch, metrics)
+    if args.optimizer == 'sgd':
+        optimizer = tf.keras.optimizers.SGD(lr_scheduler, momentum=.9, decay=.0001)
+    elif args.optimizer == 'adam':
+        optimizer = tf.keras.optimizers.Adam(lr_scheduler)
 
     ##########################
     # Train
@@ -115,21 +97,11 @@ def main():
     # validation_steps = 10
     train_iterator = iter(train_generator)
     val_iterator = iter(val_generator)
-    unlabel_iterator = iter(unlabel_generator)
 
-    progress_desc_train = 'Train : Loss {:.4f} | XE {:.4f} | KL {:.4f} | Acc {:.4f}'
+    progress_desc_train = 'Train : Loss {:.4f} | Acc {:.4f}'
     progress_desc_val = 'Val : Loss {:.4f} | Acc {:.4f}'
 
-    # @tf.function
-    # def train_step():
-        
-
-    # @tf.function
-    # def val_step():
-        
-
-
-    for epoch in range(args.epochs):
+    for epoch in range(initial_epoch, args.epochs):
         print('\nEpoch {}/{}'.format(epoch+1, args.epochs))
         print('Learning Rate : {}'.format(optimizer.learning_rate(optimizer.iterations)))
 
@@ -138,42 +110,23 @@ def main():
             desc=progress_desc_train.format(0, 0, 0, 0), 
             leave=True)
         for step in progressbar_train:
-            sup_inputs = next(train_iterator)
-            unup_inputs = next(unlabel_iterator)
-            sup_img = sup_inputs[0]['main_input']
-            sup_label = sup_inputs[1]['main_output']
-            unsup_img = unup_inputs['img']
-            unsup_augimg = unup_inputs['augimg']
-
+            inputs = next(train_iterator)
+            img = inputs[0]['main_input']
+            label = inputs[1]['main_output']
             with tf.GradientTape() as tape:
-                img = tf.concat([sup_img, unsup_img, unsup_augimg], axis=0)
                 logits = tf.cast(model(img, training=True), tf.float32)
+                loss = tf.keras.losses.categorical_crossentropy(label, logits)
+                loss = tf.reduce_mean(loss)
 
-                logit_sup, logit_unsup, logit_aug_unsup = tf.split(
-                    logits,
-                    [int(sup_img.shape[0]),
-                        int(unsup_img.shape[0]),
-                        int(unsup_augimg.shape[0])])
-
-                loss_xe = tf.keras.losses.categorical_crossentropy(sup_label, logit_sup)
-                loss_xe = tf.reduce_mean(loss_xe)
-                loss_kl = tf.keras.losses.KLD(logit_unsup, logit_aug_unsup)
-
-                total_loss = loss_xe + args.klloss_weight * loss_kl
-
-            grads = tape.gradient(total_loss, model.trainable_variables)
+            grads = tape.gradient(loss, model.trainable_variables)
             optimizer.apply_gradients(zip(grads, model.trainable_variables))
 
-            metrics['loss'].update_state(total_loss)
-            metrics['loss_xe'].update_state(loss_xe)
-            metrics['loss_kl'].update_state(loss_kl)
-            metrics['acc'].update_state(sup_label, logit_sup)
+            metrics['loss'].update_state(loss)
+            metrics['acc'].update_state(label, logits)
 
             progressbar_train.set_description(
                 progress_desc_train.format(
                     metrics['loss'].result(),
-                    metrics['loss_xe'].result(),
-                    metrics['loss_kl'].result(),
                     metrics['acc'].result()))
             progressbar_train.refresh()
         
@@ -221,14 +174,8 @@ def main():
             csvlogger = csvlogger.append(logs, ignore_index=True)
             csvlogger.to_csv(os.path.join(args.result_path, '{}/history/epoch.csv'.format(args.stamp)), index=False)
         
-        for v in metrics.values:
+        for k, v in metrics.items():
             v.reset_states()
-        # metrics['loss'].reset_states()
-        # metrics['loss_xe'].reset_states()
-        # metrics['loss_kl'].reset_states()
-        # metrics['acc'].reset_states()
-        # metrics['val_loss'].reset_states()
-        # metrics['val_acc'].reset_states()
 
 
 if __name__ == '__main__':
