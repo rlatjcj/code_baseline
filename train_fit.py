@@ -68,7 +68,12 @@ def main():
     if initial_epoch == -1:
         return
 
-    if args.snapshot is None:
+    if initial_epoch == -1:
+        # training was already finished!
+        return
+
+    elif initial_epoch == 0:
+        # first training or training with snapshot
         weekday = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
         temp = datetime.now()
         args.stamp = "{:02d}{:02d}{:02d}_{}_{:02d}_{:02d}_{:02d}".format(
@@ -80,6 +85,7 @@ def main():
             temp.minute,
             temp.second,
         )
+
 
     logger = get_logger("MyLogger")
     for k, v in vars(args).items():
