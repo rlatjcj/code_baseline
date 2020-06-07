@@ -3,6 +3,8 @@ import tensorflow as tf
 import tensorflow_addons as tfa
 
 
+CROP_PADDING = 32
+
 mean_std = {
     'cub': [[0.48552202, 0.49934904, 0.43224954], 
             [0.18172876, 0.18109447, 0.19272076]],
@@ -44,13 +46,29 @@ class Augment:
 
     def _random_crop(self, x, shape):
         begin, size, bboxes = tf.image.sample_distorted_bounding_box(
-            shape, [[[0, 0, 1, 1]]], min_object_covered=.5)
+            image_size=shape, 
+            bounding_boxes=tf.constant([0.0, 0.0, 1.0, 1.0], dtype=tf.float32, shape=[1, 1, 4]), 
+            min_object_covered=.1,
+            aspect_ratio_range=(3. / 4., 4. / 3.),
+            area_range=(0.08, 1.0),
+            max_attempts=10,
+            use_image_if_no_bounding_boxes=True)
+
         x = tf.slice(x, begin, size)
         return x
 
     def _center_crop(self, x, shape):
-        length = tf.reduce_min(shape[:2])
-        x = tf.image.crop_to_bounding_box(x, (shape[0]-length)//2, (shape[1]-length)//2, length, length)
+        image_height = shape[0]
+        image_width = shape[1]
+        padded_center_crop_size = tf.cast(
+            ((self.args.img_size/(self.args.img_size+CROP_PADDING)) * 
+                tf.cast(tf.math.minimum(image_height, image_width), tf.float32)),
+            tf.int32)
+
+        offset_height = ((image_height - padded_center_crop_size) + 1) // 2
+        offset_width = ((image_width - padded_center_crop_size) + 1) // 2
+        x = tf.image.crop_to_bounding_box(
+            x, offset_height, offset_width, padded_center_crop_size, padded_center_crop_size)
         return x
     
     ####################
@@ -65,7 +83,8 @@ class Augment:
         return x
 
     def _rotate(self, x):
-        x = tfa.image.rotate(x, tf.random.uniform(minval=-self.args.angle, maxval=self.args.angle, shape=[])*np.pi/180, interpolation='BILINEAR')
+        angle = tf.random.uniform(minval=-self.args.angle, maxval=self.args.angle, shape=[])*np.pi/180
+        x = tfa.image.rotate(x, angle, interpolation='BILINEAR')
         x = tf.saturate_cast(x, tf.uint8)
         return x
 
@@ -78,28 +97,32 @@ class Augment:
         x = tf.saturate_cast(x, tf.uint8)
         return x
 
-    def _contrast(self, x):
-        x = tf.image.random_contrast(x, lower=1-self.args.contrast, upper=1+self.args.contrast)
+    def _contrast(self, x, contrast=None):
+        contrast = contrast or self.args.contrast
+        x = tf.image.random_contrast(x, lower=1-contrast, upper=1+contrast)
         x = tf.saturate_cast(x, tf.uint8)
         return x
 
-    def _brightness(self, x):
-        x = tf.image.random_brightness(x, max_delta=self.args.brightness)
+    def _brightness(self, x, brightness=None):
+        brightness = brightness or self.args.brightness
+        x = tf.image.random_brightness(x, max_delta=brightness)
         x = tf.saturate_cast(x, tf.uint8)
         return x
 
-    def _saturation(self, x):
-        x = tf.image.random_saturation(x, lower=1-self.args.contrast, upper=1+self.args.contrast)
+    def _saturation(self, x, saturation=None):
+        saturation = saturation or self.args.saturation
+        x = tf.image.random_saturation(x, lower=1-saturation, upper=1+saturation)
         x = tf.saturate_cast(x, tf.uint8)
         return x
 
-    def _hue(self, x):
-        x = tf.image.random_hue(x, max_delta=self.args.hue)
+    def _hue(self, x, hue=None):
+        hue = hue or self.args.hue
+        x = tf.image.random_hue(x, max_delta=hue)
         x = tf.saturate_cast(x, tf.uint8)
         return x
 
-    def _gray(self, x):
-        if tf.random.uniform([]) < .2:
+    def _gray(self, x, p=.2):
+        if tf.less(tf.random.uniform([], minval=0, maxval=1, dtype=tf.float32), tf.cast(p, tf.float32)):
             x = tf.image.rgb_to_grayscale(x)
             x = tf.tile(x, [1, 1, 3])
         return x
@@ -157,3 +180,27 @@ class WeakAugment(Augment):
             self.augment_list.append(self._resize)
 
         self.augment_list.append(self._standardize)
+
+
+class SimAugment(Augment):
+    def __init__(self, args, mode):
+        super().__init__(args, mode)
+        self.augment_list = []
+        if self.mode == 'train':
+            self.augment_list.append(self._random_crop)
+            self.augment_list.append(self._resize)
+            self.augment_list.append(self._color_jitter)
+            self.augment_list.append(self._gray)
+        else:
+            self.augment_list.append(self._center_crop)
+            self.augment_list.append(self._resize)
+
+        self.augment_list.append(self._standardize)
+
+    def _color_jitter(self, x, p=.8):
+        if tf.less(tf.random.uniform([], minval=0, maxval=1, dtype=tf.float32), tf.cast(p, tf.float32)):
+            x = self._brightness(x, brightness=.8)
+            x = self._contrast(x, contrast=.8)
+            x = self._saturation(x, saturation=.8)
+            x = self._hue(x, hue=.2)
+        return x

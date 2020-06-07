@@ -62,12 +62,7 @@ def compile_model(args, model, steps_per_epoch):
 
 def main():
     args = set_default(get_argument())
-    get_session(args)
-
     args, initial_epoch = search_same(args)
-    if initial_epoch == -1:
-        return
-
     if initial_epoch == -1:
         # training was already finished!
         return
@@ -86,7 +81,7 @@ def main():
             temp.second,
         )
 
-
+    get_session(args)
     logger = get_logger("MyLogger")
     for k, v in vars(args).items():
         logger.info("{} : {}".format(k, v))

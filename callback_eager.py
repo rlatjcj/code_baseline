@@ -3,7 +3,7 @@ import yaml
 import pandas as pd
 import tensorflow as tf
 import tensorflow.keras.backend as K
-from tensorflow.keras.callbacks import LearningRateScheduler
+from tensorflow.keras.optimizers.schedules import LearningRateSchedule
 from sklearn.metrics import roc_auc_score
 
 class OptionalLearningRateSchedule(LearningRateSchedule):
@@ -14,17 +14,16 @@ class OptionalLearningRateSchedule(LearningRateSchedule):
 
         if self.args.lr_mode == 'exponential':
             decay_epochs = [int(e) for e in self.args.lr_interval.split(',')]
-            lr_values = [self.args.lr * (self.args.lr_value ** k)
-                         for k in range(len(decay_epochs) + 1)]
+            lr_values = [self.args.lr * (self.args.lr_value ** k)for k in range(len(decay_epochs) + 1)]
             self.lr_scheduler = \
-                tf.keras.optimizers.schedules.PiecewiseConstantDecay(
-                    decay_epochs, lr_values)
+                tf.keras.optimizers.schedules.PiecewiseConstantDecay(decay_epochs, lr_values)
 
         elif self.args.lr_mode == 'cosine':
             self.lr_scheduler = \
-                tf.keras.experimental.CosineDecay(
-                    self.args.lr, self.args.epochs
-                )
+                tf.keras.experimental.CosineDecay(self.args.lr, self.args.epochs)
+
+        elif self.args.lr_mode == 'constant':
+            self.lr_scheduler = lambda x: x
             
 
     def get_config(self):
@@ -126,28 +125,26 @@ def evaluate(args, model, epoch, generator1=None, generator2=None, trainset=None
 
     return logs
 
-def create_callbacks(args, steps_per_epoch, metrics):
+def create_callbacks(args, metrics):
     if args.snapshot is None:
         if args.checkpoint or args.history or args.tensorboard:
-            os.makedirs(os.path.join(args.result_path, args.stamp), exist_ok=True)
+            os.makedirs(os.path.join(args.result_path, args.dataset, args.stamp), exist_ok=True)
             yaml.dump(
                 vars(args), 
-                open(os.path.join(args.result_path, args.stamp, "model_desc.yml"), "w"), 
+                open(os.path.join(args.result_path, args.dataset, args.stamp, "model_desc.yml"), "w"), 
                 default_flow_style=False)
 
     if args.checkpoint:
-        os.makedirs(os.path.join(args.result_path, '{}/checkpoint'.format(args.stamp)), exist_ok=True)
+        os.makedirs(os.path.join(args.result_path, '{}/{}/checkpoint'.format(args.dataset, args.stamp)), exist_ok=True)
 
     if args.history:
-        os.makedirs(os.path.join(args.result_path, '{}/history'.format(args.stamp)), exist_ok=True)
+        os.makedirs(os.path.join(args.result_path, '{}/{}/history'.format(args.dataset, args.stamp)), exist_ok=True)
         csvlogger = pd.DataFrame(columns=['epoch']+list(metrics.keys()))
-        if os.path.isfile(os.path.join(args.result_path, '{}/history/epoch.csv'.format(args.stamp))):
-            csvlogger = pd.read_csv(os.path.join(args.result_path, '{}/history/epoch.csv'.format(args.stamp)))
+        if os.path.isfile(os.path.join(args.result_path, '{}/{}/history/epoch.csv'.format(args.dataset, args.stamp))):
+            csvlogger = pd.read_csv(os.path.join(args.result_path, '{}/{}/history/epoch.csv'.format(args.dataset, args.stamp)))
         else:
-            csvlogger.to_csv(os.path.join(args.result_path, '{}/history/epoch.csv'.format(args.stamp)), index=False)
+            csvlogger.to_csv(os.path.join(args.result_path, '{}/{}/history/epoch.csv'.format(args.dataset, args.stamp)), index=False)
     else:
         csvlogger = None
 
-    lr_scheduler = OptionalLearningRateSchedule(args, steps_per_epoch)
-
-    return csvlogger, lr_scheduler
+    return csvlogger
