@@ -1,4 +1,5 @@
 import tensorflow as tf
+import tensorflow_addons as tfa
 import tensorflow.keras.backend as K
 
 def crossentropy(args):
@@ -7,6 +8,17 @@ def crossentropy(args):
             return tf.keras.losses.binary_crossentropy(y_true, y_pred)
         else:
             return tf.keras.losses.categorical_crossentropy(y_true, y_pred)
+    return _loss
+
+def focal(args, alpha=.25, gamma=2.):
+    def _loss(y_true, y_pred):
+        if args.classes == 1:
+            return tfa.losses.sigmoid_focal_crossentropy(y_true, y_pred, alpha=alpha, gamma=gamma)
+        else:
+            y_pred = tf.clip_by_value(y_pred, K.epsilon(), 1-K.epsilon())
+            ce = -y_true * tf.math.log(y_pred)
+            loss = alpha * tf.math.pow(1-y_pred, gamma) * ce
+            return tf.reduce_sum(loss, axis=-1)
     return _loss
 
 def dice_loss(args):

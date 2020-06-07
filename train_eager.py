@@ -75,6 +75,16 @@ def main():
     logger.info("    --> {}".format(validation_steps))
 
     ##########################
+    # Model
+    ##########################
+    model = set_model.Backbone(args, logger)
+    if args.summary:
+        model.summary()
+        return
+
+    logger.info("Build model!")
+
+    ##########################
     # Metric
     ##########################
     metrics = {
