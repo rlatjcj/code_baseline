@@ -7,10 +7,11 @@ from tensorflow.keras.optimizers.schedules import LearningRateSchedule
 from sklearn.metrics import roc_auc_score
 
 class OptionalLearningRateSchedule(LearningRateSchedule):
-    def __init__(self, args, steps_per_epoch):
+    def __init__(self, args, steps_per_epoch, initial_epoch):
         super(OptionalLearningRateSchedule, self).__init__()
         self.args = args
         self.steps_per_epoch = steps_per_epoch
+        self.initial_epoch = initial_epoch
 
         if self.args.lr_mode == 'exponential':
             decay_epochs = [int(e) for e in self.args.lr_interval.split(',')]
@@ -20,7 +21,7 @@ class OptionalLearningRateSchedule(LearningRateSchedule):
 
         elif self.args.lr_mode == 'cosine':
             self.lr_scheduler = \
-                tf.keras.experimental.CosineDecay(self.args.lr, self.args.epochs)
+                tf.keras.experimental.CosineDecay(self.args.lr, self.args.epochs-self.args.lr_warmup)
 
         elif self.args.lr_mode == 'constant':
             self.lr_scheduler = lambda x: x
@@ -38,7 +39,8 @@ class OptionalLearningRateSchedule(LearningRateSchedule):
 
     def __call__(self, step):
         step = tf.cast(step, tf.float32)
-        lr_epoch = step / self.steps_per_epoch
+        step += self.initial_epoch * self.steps_per_epoch
+        lr_epoch = (step / self.steps_per_epoch)
         if self.args.lr_warmup:
             total_lr_warmup_step = self.args.lr_warmup * self.steps_per_epoch
             return tf.cond(lr_epoch < self.args.lr_warmup,

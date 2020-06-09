@@ -151,9 +151,9 @@ def search_same(args):
         search_ignore += args.ignore_search.split(',')
 
     initial_epoch = 0
-    stamps = os.listdir(args.result_path)
+    stamps = os.listdir(os.path.join(args.result_path, args.dataset))
     for stamp in stamps:
-        desc = yaml.full_load(open(os.path.join(args.result_path, '{}/model_desc.yml'.format(stamp))))
+        desc = yaml.full_load(open(os.path.join(args.result_path, '{}/{}/model_desc.yml'.format(args.dataset, stamp))))
         flag = True
         for k, v in vars(args).items():
             if k in search_ignore:
@@ -165,7 +165,7 @@ def search_same(args):
 
         if flag:
             args.stamp = stamp
-            df = pd.read_csv(os.path.join(args.result_path, '{}/history/epoch.csv'.format(args.stamp)))
+            df = pd.read_csv(os.path.join(args.result_path, '{}/{}/history/epoch.csv'.format(args.dataset, args.stamp)))
 
             if len(df) > 0:
                 if df['epoch'].values[-1]+1 == args.epochs:
@@ -173,9 +173,9 @@ def search_same(args):
                     return args, -1
 
                 else:
-                    ckpt_list = sorted([d for d in os.listdir(os.path.join(args.result_path, '{}/checkpoint'.format(stamp))) if 'h5' in d],
+                    ckpt_list = sorted([d for d in os.listdir(os.path.join(args.result_path, '{}/{}/checkpoint'.format(args.dataset, stamp))) if 'h5' in d],
                                         key=lambda x: int(x.split('_')[0]))
-                    args.snapshot = os.path.join(args.result_path, '{}/checkpoint/{}'.format(args.stamp, ckpt_list[-1]))
+                    args.snapshot = os.path.join(args.result_path, '{}/{}/checkpoint/{}'.format(args.dataset, args.stamp, ckpt_list[-1]))
                     initial_epoch = int(ckpt_list[-1].split('_')[0])
 
             break
