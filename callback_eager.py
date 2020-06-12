@@ -1,6 +1,8 @@
 import os
 import yaml
 import pandas as pd
+from datetime import datetime
+
 import tensorflow as tf
 import tensorflow.keras.backend as K
 from tensorflow.keras.optimizers.schedules import LearningRateSchedule
@@ -127,9 +129,31 @@ def evaluate(args, model, epoch, generator1=None, generator2=None, trainset=None
 
     return logs
 
+
+def create_stamp():
+    weekday = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    temp = datetime.now()
+    return "{:02d}{:02d}{:02d}_{}_{:02d}_{:02d}_{:02d}".format(
+        temp.year // 100,
+        temp.month,
+        temp.day,
+        weekday[temp.weekday()],
+        temp.hour,
+        temp.minute,
+        temp.second,
+    )
+
 def create_callbacks(args, metrics):
     if args.snapshot is None:
         if args.checkpoint or args.history or args.tensorboard:
+            flag = True
+            while flag:
+                try:
+                    os.makedirs(os.path.join(args.result_path, args.task, args.stamp))
+                    flag = False
+                except:
+                    args.stamp = create_stamp()
+
             os.makedirs(os.path.join(args.result_path, args.dataset, args.stamp), exist_ok=True)
             yaml.dump(
                 vars(args), 
@@ -149,4 +173,10 @@ def create_callbacks(args, metrics):
     else:
         csvlogger = None
 
-    return csvlogger
+    if args.tensorboard:
+        train_writer = tf.summary.create_file_writer(os.path.join(args.result_path, 'logs/train'))
+        val_writer = tf.summary.create_file_writer(os.path.join(args.result_path, 'logs/val'))
+    else:
+        train_writer = val_writer = None
+
+    return csvlogger, train_writer, val_writer
